@@ -1,0 +1,8 @@
+Edge Proxy is installed. Config is loaded from the Secret "{{ .Values.existingSecret }}".
+
+To retrieve feature flags from the host:
+  1. Port-forward: kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "edge-proxy.fullname" . }} 8000:8000
+  2. Get flags: curl -H "X-Environment-Key: YOUR_CLIENT_SIDE_KEY" http://localhost:8000/api/v1/flags/
+  3. Or identity flags: curl -H "X-Environment-Key: YOUR_CLIENT_SIDE_KEY" "http://localhost:8000/api/v1/identities/?identifier=user123"
+
+Ensure the Secret contains API_URL and ENVIRONMENT_KEY_PAIRS (see deploy/edge-proxy-secret.example.yaml).

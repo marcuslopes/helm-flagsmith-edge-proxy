@@ -1,0 +1,16 @@
+# Values for edge-proxy Helm chart.
+# Create the Secret first: see deploy/edge-proxy-secret.example.yaml
+
+fullnameOverride: edge-proxy
+existingSecret: edge-proxy-config
+
+replicaCount: 1
+
+image:
+  repository: flagsmith/edge-proxy
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000

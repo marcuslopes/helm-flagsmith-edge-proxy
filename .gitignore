@@ -1,0 +1,4 @@
+# Local Edge Proxy secret (contains real Flagsmith env keys)
+deploy/edge-proxy-secret.yaml
+# Organisation API token for sync Job (do not commit)
+deploy/flagsmith-organisation-token.yaml

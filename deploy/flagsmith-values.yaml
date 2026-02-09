@@ -1,0 +1,12 @@
+# Overrides for Flagsmith Helm chart (flagsmith/flagsmith).
+# Use with: helm install flagsmith flagsmith/flagsmith -n flagsmith --create-namespace -f deploy/flagsmith-values.yaml
+#
+# Set a stable secretKey so it does not change on redeploy (required for production).
+# Generate with: openssl rand -hex 32
+api:
+  secretKey: "CHANGE_ME_use_openssl_rand_hex_32"
+  bootstrap:
+    enabled: true
+    adminEmail: "admin@example.com"
+    organisationName: "My Organisation"
+    projectName: "My Project"

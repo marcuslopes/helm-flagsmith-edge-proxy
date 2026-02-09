@@ -1,0 +1,7 @@
+apiVersion: v2
+name: edge-proxy
+description: Flagsmith Edge Proxy - polls Flagsmith API and serves flags via Edge API
+type: application
+version: 0.1.0
+appVersion: "latest"
+maintainers: []

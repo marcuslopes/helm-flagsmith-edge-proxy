@@ -1,0 +1,44 @@
+# Default values for edge-proxy.
+# Config (API_URL, ENVIRONMENT_KEY_PAIRS) must be provided via existingSecret;
+# create the Secret from deploy/edge-proxy-secret.example.yaml before installing.
+
+replicaCount: 1
+
+image:
+  repository: flagsmith/edge-proxy
+  tag: latest
+  pullPolicy: IfNotPresent
+
+# Name of existing Secret containing API_URL and ENVIRONMENT_KEY_PAIRS
+existingSecret: edge-proxy-config
+
+service:
+  type: ClusterIP
+  port: 8000
+
+# Optional: override default resource limits
+resources: {}
+#  limits:
+#    cpu: 100m
+#    memory: 128Mi
+#  requests:
+#    cpu: 50m
+#    memory: 64Mi
+
+livenessProbe:
+  httpGet:
+    path: /proxy/health/liveness
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /proxy/health/readiness
+    port: 8000
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 5

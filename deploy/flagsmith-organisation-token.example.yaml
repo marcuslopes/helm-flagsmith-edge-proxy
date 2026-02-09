@@ -1,0 +1,18 @@
+# Example Secret for the Flagsmith Organisation API Token. Do NOT commit real tokens.
+#
+# 1. Copy: cp flagsmith-organisation-token.example.yaml flagsmith-organisation-token.yaml
+# 2. In Flagsmith UI: Organisation (sidebar) -> API Keys -> Create Token. Copy the token.
+# 3. Replace YOUR_ORGANISATION_API_TOKEN below with that value.
+# 4. Apply: kubectl apply -f deploy/flagsmith-organisation-token.yaml -n flagsmith
+#
+# The sync Job (deploy/sync-edge-proxy-secret-job.yaml) reads this Secret to call the
+# Admin API and populate the edge-proxy-config Secret with environment key pairs.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: flagsmith-organisation-token
+  namespace: flagsmith
+type: Opaque
+stringData:
+  ORGANISATION_API_TOKEN: "YOUR_ORGANISATION_API_TOKEN"
