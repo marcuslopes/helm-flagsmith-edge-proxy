@@ -1,11 +1,11 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Fetch 1-2 environment key pairs from Flagsmith Admin API and create/update
+    Fetch all environment key pairs from all Flagsmith projects and create/update
     the edge-proxy-config Secret.
 .DESCRIPTION
     Requires ORGANISATION_API_TOKEN and FLAGSMITH_API_URL in the environment;
-    optional NAMESPACE (default: flagsmith) and MAX_ENV_PAIRS (default: 2).
+    optional NAMESPACE (default: flagsmith).
     Uses the in-cluster service account for Kubernetes API access.
 #>
 
@@ -15,7 +15,6 @@ $ErrorActionPreference = "Stop"
 $Token       = ($env:ORGANISATION_API_TOKEN ?? "").Trim()
 $BaseUrl     = ($env:FLAGSMITH_API_URL ?? "").Trim()
 $Namespace   = if ($env:NAMESPACE) { $env:NAMESPACE } else { "flagsmith" }
-$MaxPairs    = if ($env:MAX_ENV_PAIRS) { [int]$env:MAX_ENV_PAIRS } else { 2 }
 
 if (-not $Token) {
     Write-Warning "ORGANISATION_API_TOKEN not set; skipping sync."
@@ -82,7 +81,7 @@ if (-not $apiReady) {
 }
 Write-Host "Flagsmith API is up."
 
-# --- List projects ---
+# --- List all projects ---
 try {
     $projectsResp = Invoke-FlagsmithApi -Path "/api/v1/projects/"
 } catch {
@@ -95,71 +94,63 @@ if ($projectList.Count -eq 0) {
     Write-Error "No projects found; create one in the UI or use bootstrap."
     exit 1
 }
-$projectId = $projectList[0].id
+Write-Host "Found $($projectList.Count) project(s)."
 
-# --- List environments ---
-try {
-    $envsResp = Invoke-FlagsmithApi -Path "/api/v1/environments/?project=$projectId"
-} catch {
-    $status = $_.Exception.Response.StatusCode.value__
-    Write-Error "Failed to list environments: $status"
-    exit 1
-}
-$envs = Get-ResultsList $envsResp
-
-if ($envs.Count -eq 0) {
-    try {
-        $null = Invoke-FlagsmithApi -Path "/api/v1/environments/" -Method POST -Body @{
-            name    = "Development"
-            project = $projectId
-        }
-        $envsResp = Invoke-FlagsmithApi -Path "/api/v1/environments/?project=$projectId"
-        $envs = Get-ResultsList $envsResp
-    } catch {
-        Write-Error "Could not create default environment: $_"
-        exit 1
-    }
-}
-if ($envs.Count -eq 0) {
-    Write-Error "No environments found."
-    exit 1
-}
-
-# --- Collect key pairs ---
+# --- Collect key pairs from all environments across all projects ---
 $pairs = @()
-foreach ($env in $envs | Select-Object -First $MaxPairs) {
-    $clientKey = $env.api_key
-    if (-not $clientKey) { continue }
+foreach ($project in $projectList) {
+    $projectId = $project.id
+    $projectName = $project.name
+    Write-Host "Processing project '$projectName' (id=$projectId)..."
 
-    $serverKey = $null
     try {
-        $keysResp = Invoke-FlagsmithApi -Path "/api/v1/environments/$clientKey/api-keys/"
-        $keyList = Get-ResultsList $keysResp
-        if ($keyList.Count -eq 0 -and $keysResp -is [PSCustomObject] -and $keysResp.key) {
-            $keyList = @($keysResp)
-        }
-        foreach ($k in $keyList) {
-            $active = if ($null -ne $k.active) { $k.active } else { $true }
-            if ($active -and $k.key) {
-                $serverKey = $k.key
-                break
-            }
-        }
-        if (-not $serverKey) {
-            $created = Invoke-FlagsmithApi -Path "/api/v1/environments/$clientKey/api-keys/" `
-                -Method POST -Body @{ name = "auto-created" }
-            if ($created.key) {
-                $serverKey = $created.key
-            }
-        }
+        $envsResp = Invoke-FlagsmithApi -Path "/api/v1/environments/?project=$projectId"
     } catch {
-        # Skip this environment on error
+        Write-Warning "Failed to list environments for project '$projectName'; skipping."
+        continue
+    }
+    $envs = Get-ResultsList $envsResp
+
+    if ($envs.Count -eq 0) {
+        Write-Host "  No environments in project '$projectName'; skipping."
+        continue
     }
 
-    if ($serverKey) {
-        $pairs += @{
-            server_side_key = $serverKey
-            client_side_key = $clientKey
+    foreach ($env in $envs) {
+        $clientKey = $env.api_key
+        if (-not $clientKey) { continue }
+
+        $serverKey = $null
+        try {
+            $keysResp = Invoke-FlagsmithApi -Path "/api/v1/environments/$clientKey/api-keys/"
+            $keyList = Get-ResultsList $keysResp
+            if ($keyList.Count -eq 0 -and $keysResp -is [PSCustomObject] -and $keysResp.key) {
+                $keyList = @($keysResp)
+            }
+            foreach ($k in $keyList) {
+                $active = if ($null -ne $k.active) { $k.active } else { $true }
+                if ($active -and $k.key) {
+                    $serverKey = $k.key
+                    break
+                }
+            }
+            if (-not $serverKey) {
+                $created = Invoke-FlagsmithApi -Path "/api/v1/environments/$clientKey/api-keys/" `
+                    -Method POST -Body @{ name = "auto-created" }
+                if ($created.key) {
+                    $serverKey = $created.key
+                }
+            }
+        } catch {
+            # Skip this environment on error
+        }
+
+        if ($serverKey) {
+            $pairs += @{
+                server_side_key = $serverKey
+                client_side_key = $clientKey
+            }
+            Write-Host "  Collected key pair for environment '$($env.name)'"
         }
     }
 }
