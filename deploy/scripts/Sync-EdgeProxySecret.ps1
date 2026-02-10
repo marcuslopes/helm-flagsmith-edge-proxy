@@ -48,7 +48,7 @@ function Invoke-FlagsmithApi {
     Invoke-RestMethod @params
 }
 
-function Get-ResultsList($response) {
+function ConvertTo-ResultList($response) {
     if ($response -is [array]) { return $response }
     if ($response -is [hashtable] -or $response.PSObject.Properties.Name -contains "results") {
         $r = $response.results
@@ -89,7 +89,7 @@ try {
     Write-Error "Failed to list projects: $status"
     exit 1
 }
-$projectList = Get-ResultsList $projectsResp
+$projectList = ConvertTo-ResultList $projectsResp
 if ($projectList.Count -eq 0) {
     Write-Error "No projects found; create one in the UI or use bootstrap."
     exit 1
@@ -109,7 +109,7 @@ foreach ($project in $projectList) {
         Write-Warning "Failed to list environments for project '$projectName'; skipping."
         continue
     }
-    $envs = Get-ResultsList $envsResp
+    $envs = ConvertTo-ResultList $envsResp
 
     if ($envs.Count -eq 0) {
         Write-Host "  No environments in project '$projectName'; skipping."
@@ -123,7 +123,7 @@ foreach ($project in $projectList) {
         $serverKey = $null
         try {
             $keysResp = Invoke-FlagsmithApi -Path "/api/v1/environments/$clientKey/api-keys/"
-            $keyList = Get-ResultsList $keysResp
+            $keyList = ConvertTo-ResultList $keysResp
             if ($keyList.Count -eq 0 -and $keysResp -is [PSCustomObject] -and $keysResp.key) {
                 $keyList = @($keysResp)
             }
