@@ -132,6 +132,28 @@ curl -H "X-Environment-Key: YOUR_CLIENT_SIDE_KEY" "http://localhost:8000/api/v1/
 
 Replace `YOUR_CLIENT_SIDE_KEY` with the client-side environment key from Flagsmith.
 
+## Running the Pester tests
+
+The `deploy.Tests.ps1` file is a [Pester](https://pester.dev/) test suite that performs a full end-to-end deployment and verifies that Edge Proxy returns the expected feature flags. It runs completely non-interactively — no manual token entry required.
+
+```powershell
+# Install Pester if needed
+Install-Module -Name Pester -Force -SkipPublisherCheck
+
+# Run the tests
+Invoke-Pester ./deploy.Tests.ps1 -Output Detailed
+```
+
+The test suite will:
+1. Verify prerequisites (`kind`, `kubectl`, `helm`)
+2. Create a kind cluster
+3. Install Flagsmith via Helm and wait for pods
+4. Log in with the bootstrap admin credentials and create an Organisation API Token via the API
+5. Create a feature flag in the default project/environment
+6. Run the sync Job to populate the Edge Proxy secret
+7. Install Edge Proxy and wait for it to be ready
+8. Retrieve flags from Edge Proxy and assert the created flag is present
+
 ## File layout
 
 | Path | Purpose |
@@ -146,6 +168,7 @@ Replace `YOUR_CLIENT_SIDE_KEY` with the client-side environment key from Flagsmi
 | `deploy/scripts/sync-edge-proxy-secret.py` | Script (used by Job via ConfigMap) to call Admin API and update Secret |
 | `charts/edge-proxy/` | Custom Helm chart for Edge Proxy (Deployment, Service, config from Secret) |
 | `deploy.ps1` | PowerShell script to automate the full deployment |
+| `deploy.Tests.ps1` | Pester test suite for end-to-end deployment verification |
 
 ## Communication
 

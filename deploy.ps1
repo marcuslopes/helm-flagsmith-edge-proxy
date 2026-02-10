@@ -12,6 +12,15 @@
     Server-side environment key (for -ManualKeys).
 .PARAMETER ClientSideKey
     Client-side environment key (for -ManualKeys).
+.PARAMETER OrganisationApiToken
+    Flagsmith Organisation API Token. When provided, the sync Job flow
+    uses this token directly instead of creating one via the API.
+.PARAMETER AdminEmail
+    Bootstrap admin email (default: admin@example.com). Must match
+    the bootstrap config in deploy/flagsmith-values.yaml.
+.PARAMETER AdminPassword
+    Bootstrap admin password. Set via Django manage.py if not already
+    configured (default: testpassword123).
 .PARAMETER Namespace
     Kubernetes namespace (default: flagsmith).
 #>
@@ -20,6 +29,9 @@ param(
     [switch]$ManualKeys,
     [string]$ServerSideKey,
     [string]$ClientSideKey,
+    [string]$OrganisationApiToken,
+    [string]$AdminEmail = "admin@example.com",
+    [string]$AdminPassword = "testpassword123",
     [string]$Namespace = "flagsmith"
 )
 
@@ -96,28 +108,77 @@ if ($ManualKeys) {
     Write-Ok "Edge Proxy secret applied"
 } else {
     Write-Step "Setting up Edge Proxy secret via sync Job"
-    Write-Warn "You need an Organisation API Token from the Flagsmith UI."
-    Write-Warn "If you haven't created one yet, the script will port-forward so you can."
 
-    # Port-forward Flagsmith frontend briefly so user can get the token
-    Write-Host ""
-    $token = Read-Host "Enter your Flagsmith Organisation API Token (or press Enter to port-forward and create one)"
+    if (-not [string]::IsNullOrWhiteSpace($OrganisationApiToken)) {
+        $token = $OrganisationApiToken
+        Write-Ok "Using Organisation API Token from parameter"
+    } else {
+        Write-Step "Creating Organisation API Token via Flagsmith API"
 
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-Step "Port-forwarding Flagsmith frontend to localhost:8080"
+        # Set bootstrap admin password via Django manage.py
+        Write-Ok "Setting admin password via Django manage.py"
+        $cmd = "from django.contrib.auth import get_user_model; " +
+               "User = get_user_model(); " +
+               "u = User.objects.get(email='$AdminEmail'); " +
+               "u.set_password('$AdminPassword'); " +
+               "u.save(); " +
+               "print('OK')"
+        $output = kubectl -n $Namespace exec deployment/flagsmith-api -c flagsmith-api `
+            -- python manage.py shell -c $cmd 2>&1
+        if ($output -notcontains "OK") {
+            Write-Error "Failed to set admin password: $output"
+        }
+        Write-Ok "Admin password set"
+
+        # Port-forward the API
+        $apiPort = 18080
         $portForward = Start-Process -NoNewWindow -PassThru kubectl `
-            -ArgumentList "-n", $Namespace, "port-forward", "svc/flagsmith-frontend", "8080:8080"
-        Write-Ok "Port-forward started (PID $($portForward.Id))"
-        Write-Host "    Open http://localhost:8080 in your browser" -ForegroundColor Yellow
-        Write-Host "    Log in -> Organisation -> API Keys -> Create Token" -ForegroundColor Yellow
-        Write-Host ""
-        $token = Read-Host "Paste your Organisation API Token here"
-        Stop-Process -Id $portForward.Id -ErrorAction SilentlyContinue
-        Write-Ok "Port-forward stopped"
-    }
+            -ArgumentList "-n", $Namespace, "port-forward", "svc/flagsmith-api", "${apiPort}:8000"
+        Start-Sleep -Seconds 3
+        $apiBase = "http://localhost:$apiPort"
 
-    if ([string]::IsNullOrWhiteSpace($token)) {
-        Write-Error "No token provided. Cannot run sync Job."
+        try {
+            # Wait for API to be reachable (any HTTP response = up, even 401/403)
+            $deadline = (Get-Date).AddSeconds(30)
+            $apiReady = $false
+            while ((Get-Date) -lt $deadline) {
+                try {
+                    $null = Invoke-WebRequest -Uri "$apiBase/api/v1/organisations/" -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
+                    $apiReady = $true; break
+                } catch {
+                    if ($_.Exception.Response) {
+                        # Got an HTTP response (e.g. 401/403) — API is up
+                        $apiReady = $true; break
+                    }
+                    Start-Sleep -Seconds 2
+                }
+            }
+            if (-not $apiReady) { Write-Error "Flagsmith API not reachable via port-forward" }
+
+            # Log in
+            $loginBody = @{ email = $AdminEmail; password = $AdminPassword } | ConvertTo-Json
+            $loginResp = Invoke-RestMethod -Uri "$apiBase/api/v1/auth/login/" `
+                -Method Post -ContentType "application/json" -Body $loginBody
+            if (-not $loginResp.key) { Write-Error "Admin login failed" }
+            $authHeaders = @{ Authorization = "Token $($loginResp.key)" }
+            Write-Ok "Logged in as $AdminEmail"
+
+            # Get organisation
+            $orgs = Invoke-RestMethod -Uri "$apiBase/api/v1/organisations/" -Headers $authHeaders
+            $orgResults = if ($orgs.results) { $orgs.results } else { @($orgs) }
+            if (-not $orgResults) { Write-Error "No organisations found" }
+            $orgId = $orgResults[0].id
+
+            # Create Organisation API Token
+            $tokenBody = @{ name = "deploy-script-token" } | ConvertTo-Json
+            $tokenResp = Invoke-RestMethod -Uri "$apiBase/api/v1/organisations/$orgId/master-api-keys/" `
+                -Method Post -ContentType "application/json" -Body $tokenBody -Headers $authHeaders
+            if (-not $tokenResp.key) { Write-Error "Failed to create Organisation API Token" }
+            $token = $tokenResp.key
+            Write-Ok "Organisation API Token created"
+        } finally {
+            Stop-Process -Id $portForward.Id -ErrorAction SilentlyContinue
+        }
     }
 
     # Create the organisation token secret

@@ -27,7 +27,7 @@ resources: {}
 
 livenessProbe:
   httpGet:
-    path: /proxy/health/liveness
+    path: /proxy/health
     port: 8000
   initialDelaySeconds: 5
   periodSeconds: 10
@@ -36,7 +36,7 @@ livenessProbe:
 
 readinessProbe:
   httpGet:
-    path: /proxy/health/readiness
+    path: /proxy/health
     port: 8000
   initialDelaySeconds: 5
   periodSeconds: 10

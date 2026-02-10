@@ -137,6 +137,10 @@ def main() -> int:
                 if k.get("active", True) and k.get("key"):
                     server_key = k["key"]
                     break
+            if not server_key:
+                created = api_post(base_url, f"/api/v1/environments/{client_key}/api-keys/", token, {"name": "auto-created"})
+                if created.get("key"):
+                    server_key = created["key"]
         except Exception:
             pass
         if server_key:
