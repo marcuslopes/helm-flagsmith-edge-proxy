@@ -194,6 +194,14 @@ if ($ManualKeys) {
     # Delete previous job run if it exists (jobs are immutable)
     kubectl delete job sync-edge-proxy-secret -n $Namespace --ignore-not-found 2>&1 | Out-Null
 
+    # Create ConfigMap from the sync script file
+    $syncScriptFile = Join-Path $ScriptDir "deploy/scripts/sync-edge-proxy-secret.ps1"
+    kubectl create configmap sync-edge-proxy-secret-script `
+        --from-file=sync-edge-proxy-secret.ps1=$syncScriptFile `
+        -n $Namespace --dry-run=client -o yaml | kubectl apply -f - -n $Namespace
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create sync script ConfigMap" }
+    Write-Ok "Sync script ConfigMap created"
+
     # Apply sync job
     $syncJobFile = Join-Path $ScriptDir "deploy/sync-edge-proxy-secret-job.yaml"
     kubectl apply -f $syncJobFile -n $Namespace

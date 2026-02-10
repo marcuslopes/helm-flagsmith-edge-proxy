@@ -184,6 +184,13 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
         # Delete previous job run if it exists
         kubectl delete job sync-edge-proxy-secret -n $script:Namespace --ignore-not-found 2>&1 | Out-Null
 
+        # Create ConfigMap from the sync script file
+        $syncScriptFile = Join-Path $script:ScriptDir "deploy/scripts/sync-edge-proxy-secret.ps1"
+        kubectl create configmap sync-edge-proxy-secret-script `
+            --from-file=sync-edge-proxy-secret.ps1=$syncScriptFile `
+            -n $script:Namespace --dry-run=client -o yaml | kubectl apply -f - -n $script:Namespace 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0 -Because "sync script ConfigMap must be created"
+
         # Apply sync job
         $syncJobFile = Join-Path $script:ScriptDir "deploy/sync-edge-proxy-secret-job.yaml"
         kubectl apply -f $syncJobFile -n $script:Namespace 2>&1 | Out-Null
