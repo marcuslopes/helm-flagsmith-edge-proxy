@@ -171,7 +171,6 @@ Write-Host "Collected $($pairs.Count) environment key pair(s)."
 
 # --- Create/update Kubernetes Secret via in-cluster API ---
 $saTokenPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
-$saCaPath    = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
 $k8sHost     = $env:KUBERNETES_SERVICE_HOST
 $k8sPort     = $env:KUBERNETES_SERVICE_PORT
 
@@ -180,7 +179,7 @@ if (-not $k8sHost) {
     exit 1
 }
 
-$saToken = Get-Content $saTokenPath -Raw
+$saToken = (Get-Content $saTokenPath -Raw).Trim()
 $k8sBase = "https://${k8sHost}:${k8sPort}"
 $secretUrl = "$k8sBase/api/v1/namespaces/$Namespace/secrets/edge-proxy-config"
 
@@ -205,10 +204,9 @@ $k8sHeaders = @{
 
 # Try to replace existing secret, create if 404
 try {
+    # -SkipCertificateCheck is safe here: in-cluster API server, authenticated via SA bearer token
     $null = Invoke-RestMethod -Uri $secretUrl -Method Put -Headers $k8sHeaders `
-        -Body $secretBody -TimeoutSec 15 `
-        -SkipCertificateCheck:$false `
-        -SslCaFilePath $saCaPath 2>$null
+        -Body $secretBody -TimeoutSec 15 -SkipCertificateCheck
     Write-Host "Updated Secret edge-proxy-config."
 } catch {
     $status = $_.Exception.Response.StatusCode.value__
@@ -216,9 +214,7 @@ try {
         $createUrl = "$k8sBase/api/v1/namespaces/$Namespace/secrets"
         try {
             $null = Invoke-RestMethod -Uri $createUrl -Method Post -Headers $k8sHeaders `
-                -Body $secretBody -TimeoutSec 15 `
-                -SkipCertificateCheck:$false `
-                -SslCaFilePath $saCaPath 2>$null
+                -Body $secretBody -TimeoutSec 15 -SkipCertificateCheck
             Write-Host "Created Secret edge-proxy-config."
         } catch {
             Write-Error "Failed to create Secret: $_"

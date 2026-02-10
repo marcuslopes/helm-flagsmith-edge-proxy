@@ -147,15 +147,25 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
         $projectList | Should -Not -BeNullOrEmpty -Because "at least one project must exist"
         $projectId = $projectList[0].id
 
-        # Create an environment (bootstrap does not create one)
-        $envBody = @{ name = "Development"; project = $projectId } | ConvertTo-Json
-        $envResp = Invoke-RestMethod -Uri "$apiBase/api/v1/environments/" `
-            -Method Post -ContentType "application/json" -Body $envBody -Headers $headers
+        # Get existing environments for this project
+        $envsResp = Invoke-RestMethod -Uri "$apiBase/api/v1/projects/$projectId/environments/" -Headers $headers
+        $envsList = if ($envsResp -is [array]) { $envsResp } elseif ($envsResp.results) { $envsResp.results } else { @($envsResp) }
+
+        if ($envsList.Count -eq 0) {
+            # No environments yet — create one
+            $envBody = @{ name = "Development"; project = $projectId } | ConvertTo-Json
+            $envResp = Invoke-RestMethod -Uri "$apiBase/api/v1/environments/" `
+                -Method Post -ContentType "application/json" -Body $envBody -Headers $headers
+            Write-Host "        Environment created, client key: $($envResp.api_key)" -ForegroundColor Gray
+        } else {
+            $envResp = $envsList[0]
+            Write-Host "        Using existing environment '$($envResp.name)', client key: $($envResp.api_key)" -ForegroundColor Gray
+        }
+
         $envResp.api_key | Should -Not -BeNullOrEmpty -Because "environment must have a client-side key"
         $script:ClientKey = $envResp.api_key
-        Write-Host "        Environment created, client key: $($script:ClientKey)" -ForegroundColor Gray
 
-        # Create feature flag
+        # Create feature flag (name is randomized so collisions are unlikely)
         $flagBody = @{
             name            = $script:FlagName
             project         = $projectId
@@ -165,7 +175,7 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
         $flagResp = Invoke-RestMethod -Uri "$apiBase/api/v1/projects/$projectId/features/" `
             -Method Post -ContentType "application/json" -Body $flagBody -Headers $headers
         $flagResp.name | Should -Be $script:FlagName -Because "the created flag name must match"
-        Write-Host "        Feature flag '$($script:FlagName)' created" -ForegroundColor Gray
+        Write-Host "        Feature flag '$($script:FlagName)' created (project=$projectId)" -ForegroundColor Gray
     }
 
     It "Should populate Edge Proxy secret via sync Job" {
