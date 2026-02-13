@@ -180,6 +180,25 @@ if ($ManualKeys) {
             if (-not $tokenResp.key) { Write-Error "Failed to create Organisation API Token" }
             $token = $tokenResp.key
             Write-Ok "Organisation API Token created"
+
+            # Ensure the target environment exists in the first project
+            $projects = Invoke-RestMethod -Uri "$apiBase/api/v1/projects/" -Headers $authHeaders
+            $projectList = if ($projects -is [array]) { $projects } elseif ($projects.results) { $projects.results } else { @($projects) }
+            if ($projectList.Count -eq 0) { Write-Error "No projects found" }
+            $projectId = $projectList[0].id
+
+            $envsResp = Invoke-RestMethod -Uri "$apiBase/api/v1/projects/$projectId/environments/" -Headers $authHeaders
+            $envsList = if ($envsResp -is [array]) { $envsResp } elseif ($envsResp.results) { $envsResp.results } else { @($envsResp) }
+            $existing = $envsList | Where-Object { $_.name -eq $EnvironmentName }
+
+            if (-not $existing) {
+                $envBody = @{ name = $EnvironmentName; project = $projectId } | ConvertTo-Json
+                $null = Invoke-RestMethod -Uri "$apiBase/api/v1/environments/" `
+                    -Method Post -ContentType "application/json" -Body $envBody -Headers $authHeaders
+                Write-Ok "Created environment '$EnvironmentName' in project '$($projectList[0].name)'"
+            } else {
+                Write-Ok "Environment '$EnvironmentName' already exists"
+            }
         } finally {
             Stop-Process -Id $portForward.Id -ErrorAction SilentlyContinue
         }
