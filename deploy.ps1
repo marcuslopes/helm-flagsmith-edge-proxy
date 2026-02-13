@@ -21,6 +21,9 @@
 .PARAMETER AdminPassword
     Bootstrap admin password. Set via Django manage.py if not already
     configured (default: testpassword123).
+.PARAMETER EnvironmentName
+    Flagsmith environment name to sync (default: Development).
+    Only the matching environment's key pair is synced to the Edge Proxy secret.
 .PARAMETER Namespace
     Kubernetes namespace (default: flagsmith).
 #>
@@ -32,6 +35,7 @@ param(
     [string]$OrganisationApiToken,
     [string]$AdminEmail = "admin@example.com",
     [string]$AdminPassword = "testpassword123",
+    [string]$EnvironmentName = "Development",
     [string]$Namespace = "flagsmith"
 )
 
@@ -202,9 +206,11 @@ if ($ManualKeys) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create sync script ConfigMap" }
     Write-Ok "Sync script ConfigMap created"
 
-    # Apply sync job
+    # Apply sync job — delete first since Jobs are immutable, then apply with
+    # the correct ENVIRONMENT_NAME by patching the YAML inline via kubectl.
     $syncJobFile = Join-Path $ScriptDir "deploy/sync-edge-proxy-secret-job.yaml"
-    kubectl apply -f $syncJobFile -n $Namespace
+    $syncJobYaml = (Get-Content $syncJobFile -Raw) -replace '(?<=name: ENVIRONMENT_NAME\s+value: )"Development"', "`"$EnvironmentName`""
+    $syncJobYaml | kubectl apply -f - -n $Namespace
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to apply sync job" }
 
     Write-Step "Waiting for sync Job to complete"

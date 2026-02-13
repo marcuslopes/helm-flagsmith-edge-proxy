@@ -1,20 +1,23 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Fetch all environment key pairs from all Flagsmith projects and create/update
+    Fetch environment key pairs from Flagsmith projects and create/update
     the edge-proxy-config Secret.
 .DESCRIPTION
     Requires ORGANISATION_API_TOKEN and FLAGSMITH_API_URL in the environment;
     optional NAMESPACE (default: flagsmith).
+    Optional ENVIRONMENT_NAME: if set, only the named environment is synced;
+    otherwise all environments across all projects are synced.
     Uses the in-cluster service account for Kubernetes API access.
 #>
 
 $ErrorActionPreference = "Stop"
 
 # --- Configuration from environment ---
-$Token       = ($env:ORGANISATION_API_TOKEN ?? "").Trim()
-$BaseUrl     = ($env:FLAGSMITH_API_URL ?? "").Trim()
-$Namespace   = if ($env:NAMESPACE) { $env:NAMESPACE } else { "flagsmith" }
+$Token           = ($env:ORGANISATION_API_TOKEN ?? "").Trim()
+$BaseUrl         = ($env:FLAGSMITH_API_URL ?? "").Trim()
+$Namespace       = if ($env:NAMESPACE) { $env:NAMESPACE } else { "flagsmith" }
+$EnvironmentName = if ($env:ENVIRONMENT_NAME) { $env:ENVIRONMENT_NAME.Trim() } else { $null }
 
 if (-not $Token) {
     Write-Warning "ORGANISATION_API_TOKEN not set; skipping sync."
@@ -96,7 +99,11 @@ if ($projectList.Count -eq 0) {
 }
 Write-Host "Found $($projectList.Count) project(s)."
 
-# --- Collect key pairs from all environments across all projects ---
+# --- Collect key pairs from environments across all projects ---
+if ($EnvironmentName) {
+    Write-Host "Filtering to environment '$EnvironmentName'."
+}
+
 $pairs = @()
 foreach ($project in $projectList) {
     $projectId = $project.id
@@ -111,8 +118,12 @@ foreach ($project in $projectList) {
     }
     $envs = ConvertTo-ResultList $envsResp
 
+    if ($EnvironmentName) {
+        $envs = @($envs | Where-Object { $_.name -eq $EnvironmentName })
+    }
+
     if ($envs.Count -eq 0) {
-        Write-Host "  No environments in project '$projectName'; skipping."
+        Write-Host "  No matching environments in project '$projectName'; skipping."
         continue
     }
 
@@ -156,7 +167,11 @@ foreach ($project in $projectList) {
 }
 
 if ($pairs.Count -eq 0) {
-    Write-Error "No environment key pairs collected."
+    if ($EnvironmentName) {
+        Write-Error "No key pairs collected — environment '$EnvironmentName' not found in any project."
+    } else {
+        Write-Error "No environment key pairs collected."
+    }
     exit 1
 }
 
