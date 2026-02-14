@@ -119,7 +119,7 @@ foreach ($project in $projectList) {
     $envs = ConvertTo-ResultList $envsResp
 
     if ($EnvironmentName) {
-        $envs = @($envs | Where-Object { $_.name -eq $EnvironmentName })
+        $envs = @($envs | Where-Object { $_.name -like "$EnvironmentName*" })
     }
 
     if ($envs.Count -eq 0) {

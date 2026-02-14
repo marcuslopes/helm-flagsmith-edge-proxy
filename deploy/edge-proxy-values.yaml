@@ -4,7 +4,7 @@
 fullnameOverride: edge-proxy
 existingSecret: edge-proxy-config
 
-replicaCount: 1
+replicaCount: 2
 
 image:
   repository: flagsmith/edge-proxy

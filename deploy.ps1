@@ -7,13 +7,13 @@
 .PARAMETER SkipCluster
     Skip kind cluster creation (use existing cluster).
 .PARAMETER ManualKeys
-    Use manual key entry instead of the sync Job.
+    Use manual key entry instead of the sync CronJob.
 .PARAMETER ServerSideKey
     Server-side environment key (for -ManualKeys).
 .PARAMETER ClientSideKey
     Client-side environment key (for -ManualKeys).
 .PARAMETER OrganisationApiToken
-    Flagsmith Organisation API Token. When provided, the sync Job flow
+    Flagsmith Organisation API Token. When provided, the sync CronJob flow
     uses this token directly instead of creating one via the API.
 .PARAMETER AdminEmail
     Bootstrap admin email (default: admin@example.com). Must match
@@ -94,7 +94,15 @@ if ($LASTEXITCODE -ne 0) {
     Write-Ok "All Flagsmith deployments available"
 }
 
-# --- 3. Edge Proxy Secret ---
+# --- 3. Install Stakater Reloader ---
+Write-Step "Installing Stakater Reloader (auto-restarts pods on Secret changes)"
+helm repo add stakater https://stakater.github.io/stakater-charts 2>&1 | Out-Null
+helm repo update stakater 2>&1 | Out-Null
+helm upgrade --install reloader stakater/reloader -n $Namespace
+if ($LASTEXITCODE -ne 0) { Write-Error "Reloader Helm install failed" }
+Write-Ok "Reloader installed"
+
+# --- 4. Edge Proxy Secret ---
 if ($ManualKeys) {
     Write-Step "Creating Edge Proxy secret (manual keys)"
     if (-not $ServerSideKey -or -not $ClientSideKey) {
@@ -111,7 +119,7 @@ if ($ManualKeys) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to apply edge-proxy-config secret" }
     Write-Ok "Edge Proxy secret applied"
 } else {
-    Write-Step "Setting up Edge Proxy secret via sync Job"
+    Write-Step "Setting up Edge Proxy secret via sync CronJob"
 
     if (-not [string]::IsNullOrWhiteSpace($OrganisationApiToken)) {
         $token = $OrganisationApiToken
@@ -214,8 +222,8 @@ if ($ManualKeys) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to apply organisation token secret" }
     Write-Ok "Organisation token secret applied"
 
-    # Delete previous job run if it exists (jobs are immutable)
-    kubectl delete job sync-edge-proxy-secret -n $Namespace --ignore-not-found 2>&1 | Out-Null
+    # Delete previous cronjob if it exists
+    kubectl delete cronjob sync-edge-proxy-secret -n $Namespace --ignore-not-found 2>&1 | Out-Null
 
     # Create ConfigMap from the sync script file
     $syncScriptFile = Join-Path $ScriptDir "deploy/scripts/Sync-EdgeProxySecret.ps1"
@@ -225,24 +233,29 @@ if ($ManualKeys) {
     if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create sync script ConfigMap" }
     Write-Ok "Sync script ConfigMap created"
 
-    # Apply sync job — delete first since Jobs are immutable, then apply with
-    # the correct ENVIRONMENT_NAME by patching the YAML inline via kubectl.
-    $syncJobFile = Join-Path $ScriptDir "deploy/sync-edge-proxy-secret-job.yaml"
-    $syncJobYaml = (Get-Content $syncJobFile -Raw) -replace '(?<=name: ENVIRONMENT_NAME\s+value: )"Development"', "`"$EnvironmentName`""
-    $syncJobYaml | kubectl apply -f - -n $Namespace
-    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to apply sync job" }
+    # Apply sync CronJob with the correct ENVIRONMENT_NAME
+    $syncCronJobFile = Join-Path $ScriptDir "deploy/sync-edge-proxy-secret-cronjob.yaml"
+    $syncCronJobYaml = (Get-Content $syncCronJobFile -Raw) -replace '(?<=name: ENVIRONMENT_NAME\s+value: )"Development"', "`"$EnvironmentName`""
+    $syncCronJobYaml | kubectl apply -f - -n $Namespace
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to apply sync CronJob" }
+    Write-Ok "Sync CronJob applied (runs every 5 minutes)"
 
-    Write-Step "Waiting for sync Job to complete"
-    kubectl -n $Namespace wait --for=condition=complete job/sync-edge-proxy-secret --timeout=120s
+    # Trigger an initial one-off Job from the CronJob and wait for it
+    Write-Step "Running initial sync"
+    kubectl delete job sync-edge-proxy-secret-initial -n $Namespace --ignore-not-found 2>&1 | Out-Null
+    kubectl create job sync-edge-proxy-secret-initial --from=cronjob/sync-edge-proxy-secret -n $Namespace
+    if ($LASTEXITCODE -ne 0) { Write-Error "Failed to create initial sync job from CronJob" }
+
+    kubectl -n $Namespace wait --for=condition=complete job/sync-edge-proxy-secret-initial --timeout=120s
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "Sync job did not complete. Check logs:"
-        Write-Warn "  kubectl -n $Namespace logs job/sync-edge-proxy-secret"
+        Write-Warn "Initial sync job did not complete. Check logs:"
+        Write-Warn "  kubectl -n $Namespace logs job/sync-edge-proxy-secret-initial"
     } else {
-        Write-Ok "Sync Job completed - edge-proxy-config secret created"
+        Write-Ok "Initial sync completed - edge-proxy-config secret created"
     }
 }
 
-# --- 4. Install Edge Proxy ---
+# --- 5. Install Edge Proxy ---
 Write-Step "Installing Edge Proxy via Helm"
 $edgeProxyValues = Join-Path $ScriptDir "deploy/edge-proxy-values.yaml"
 helm upgrade --install edge-proxy (Join-Path $ScriptDir "charts/edge-proxy") `
