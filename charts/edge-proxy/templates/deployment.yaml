@@ -6,11 +6,18 @@ metadata:
     {{- include "edge-proxy.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       {{- include "edge-proxy.selectorLabels" . | nindent 6 }}
   template:
     metadata:
+      annotations:
+        reloader.stakater.com/auto: "true"
       labels:
         {{- include "edge-proxy.selectorLabels" . | nindent 8 }}
     spec:

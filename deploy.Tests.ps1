@@ -3,7 +3,7 @@
     Pester tests for Flagsmith + Edge Proxy end-to-end deployment on kind.
 .DESCRIPTION
     Deploys Flagsmith and Edge Proxy to a kind cluster, creates an Organisation
-    API Token and a feature flag via the Flagsmith API, runs the sync Job, and
+    API Token and a feature flag via the Flagsmith API, runs the sync CronJob, and
     verifies that Edge Proxy returns the created flag.
 #>
 
@@ -178,7 +178,7 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
         Write-Host "        Feature flag '$($script:FlagName)' created (project=$projectId)" -ForegroundColor Gray
     }
 
-    It "Should populate Edge Proxy secret via sync Job" {
+    It "Should populate Edge Proxy secret via sync CronJob" {
         $script:OrgToken | Should -Not -BeNullOrEmpty -Because "OrgToken must be set from a prior test"
 
         # Apply the organisation token secret using deploy.ps1's non-interactive path
@@ -191,8 +191,8 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
         kubectl apply -f $tokenSecretFile -n $script:Namespace 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0 -Because "organisation token secret must be applied"
 
-        # Delete previous job run if it exists
-        kubectl delete job sync-edge-proxy-secret -n $script:Namespace --ignore-not-found 2>&1 | Out-Null
+        # Delete previous cronjob if it exists
+        kubectl delete cronjob sync-edge-proxy-secret -n $script:Namespace --ignore-not-found 2>&1 | Out-Null
 
         # Create ConfigMap from the sync script file
         $syncScriptFile = Join-Path $script:ScriptDir "deploy/scripts/Sync-EdgeProxySecret.ps1"
@@ -201,14 +201,18 @@ Describe "Flagsmith + Edge Proxy deployment" -Tag "e2e" {
             -n $script:Namespace --dry-run=client -o yaml | kubectl apply -f - -n $script:Namespace 2>&1 | Out-Null
         $LASTEXITCODE | Should -Be 0 -Because "sync script ConfigMap must be created"
 
-        # Apply sync job
-        $syncJobFile = Join-Path $script:ScriptDir "deploy/sync-edge-proxy-secret-job.yaml"
-        kubectl apply -f $syncJobFile -n $script:Namespace 2>&1 | Out-Null
-        $LASTEXITCODE | Should -Be 0 -Because "sync job must be applied"
+        # Apply sync CronJob
+        $syncCronJobFile = Join-Path $script:ScriptDir "deploy/sync-edge-proxy-secret-cronjob.yaml"
+        kubectl apply -f $syncCronJobFile -n $script:Namespace 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0 -Because "sync CronJob must be applied"
 
-        # Wait for completion
+        # Create a one-off Job from the CronJob and wait for it
         Write-Host "        Waiting up to 2 min for sync job..." -ForegroundColor Yellow
-        $output = kubectl -n $script:Namespace wait --for=condition=complete job/sync-edge-proxy-secret --timeout=120s 2>&1
+        kubectl delete job sync-edge-proxy-secret-test -n $script:Namespace --ignore-not-found 2>&1 | Out-Null
+        kubectl create job sync-edge-proxy-secret-test --from=cronjob/sync-edge-proxy-secret -n $script:Namespace 2>&1 | Out-Null
+        $LASTEXITCODE | Should -Be 0 -Because "one-off sync job must be created from CronJob"
+
+        $output = kubectl -n $script:Namespace wait --for=condition=complete job/sync-edge-proxy-secret-test --timeout=120s 2>&1
         Write-Host "        $output" -ForegroundColor Gray
         $LASTEXITCODE | Should -Be 0 -Because "sync job must complete successfully"
     }
