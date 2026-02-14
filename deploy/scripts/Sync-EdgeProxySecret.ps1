@@ -158,10 +158,14 @@ foreach ($project in $projectList) {
 
         if ($serverKey) {
             $pairs += @{
-                server_side_key = $serverKey
-                client_side_key = $clientKey
+                server_side_key  = $serverKey
+                client_side_key  = $clientKey
+                environment_id   = $env.id
+                environment_name = $env.name
+                project_id       = $projectId
+                project_name     = $projectName
             }
-            Write-Host "  Collected key pair for environment '$($env.name)'"
+            Write-Host "  Collected key pair for environment '$($env.name)' (project='$projectName')"
         }
     }
 }
