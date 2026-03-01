@@ -8,3 +8,7 @@ deploy/flagsmith-organisation-token.yaml
 *.tfstate
 *.tfstate.backup
 .terraform.lock.hcl
+
+# Load test results
+tests/jmeter/results/
+tests/k6/results/
