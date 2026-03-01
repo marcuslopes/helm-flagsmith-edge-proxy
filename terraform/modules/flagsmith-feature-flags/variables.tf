@@ -11,6 +11,6 @@ variable "flags" {
     default_enabled = optional(bool, false)
     initial_value   = optional(string, null)
     is_archived     = optional(bool, false)
-    tags            = optional(set(number), [])
+    tags            = optional(set(number), null)
   }))
 }
